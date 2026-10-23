@@ -46,13 +46,17 @@ class IFRNet_VFI:
         interpolation_model.eval().to(get_torch_device())
         frames = preprocess_frames(frames)
         
+        # Vimeo90K checkpoints were trained on triplets and only predict the middle frame (measured:
+        # t=0.25/0.75 come out as t=0.5), so build higher multipliers by recursive halving instead
+        use_timestep = "GoPro" in ckpt_name
+
         def return_middle_frame(frame_0, frame_1, timestep, model, scale_factor):
             # forward() takes (img0, img1, scale_factor, timestep), so pass by name
-            return model(frame_0, frame_1, scale_factor=scale_factor, timestep=timestep)
+            return model(frame_0, frame_1, scale_factor=scale_factor, timestep=0.5 if timestep is None else timestep)
         
         args = [interpolation_model, scale_factor]
         out = postprocess_frames(
             generic_frame_loop(type(self).__name__, frames, clear_cache_after_n_frames, multiplier, return_middle_frame, *args, 
-                               interpolation_states=optional_interpolation_states, dtype=torch.float32)
+                               interpolation_states=optional_interpolation_states, use_timestep=use_timestep, dtype=torch.float32)
         )
         return (out,)

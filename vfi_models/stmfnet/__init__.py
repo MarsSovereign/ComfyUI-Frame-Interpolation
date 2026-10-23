@@ -73,7 +73,7 @@ class STMFNet_VFI:
                     output_frames.append(frame0) # repeat the first frame
                 output_frames.append(frame1)
             if not skipped:
-                new_frame = model(frame0.to(device), frame1.to(device), frame2.to(device), frame3.to(device)).detach().cpu()
+                new_frame = model(frame0.to(device), frame1.to(device), frame2.to(device), frame3.to(device)).detach().clamp(0, 1).cpu()
                 number_of_frames_processed_since_last_cleared_cuda_cache += 2
                 output_frames.append(new_frame)
             output_frames.append(frame2)

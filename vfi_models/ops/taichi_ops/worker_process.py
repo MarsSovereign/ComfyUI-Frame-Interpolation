@@ -11,7 +11,8 @@ def f(child_conn, device: torch.DeviceObjType):
     ti.init(arch=ti.gpu)
     while True:
         op_name, tensors = child_conn.recv()
-        tensors = to_device(tensors, device)
+        # taichi kernels only accept contiguous tensors
+        tensors = tuple(tensor.contiguous() for tensor in to_device(tensors, device))
         try:
             if "softsplat" in op_name:
                 result = raw_softsplat(op_name, tensors)

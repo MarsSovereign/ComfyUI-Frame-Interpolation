@@ -1,11 +1,10 @@
 import taichi as ti
 import taichi.math as tm
-from functools import reduce
 
 @ti.kernel
 def sepconv_out(tenIn: ti.types.ndarray(), tenVer: ti.types.ndarray(), tenHor: ti.types.ndarray(), tenOut: ti.types.ndarray()):
-    N, C, H, W = tenIn.shape
-    intIndex = 0
+    # Iterate over output pixels; the outer loop runs in parallel, so each pixel writes its own index
+    N, C, H, W = tenOut.shape
     for i, ch, y, x in ti.ndrange(N, C, H, W):
         fltOut, fltKahanc, fltKahany, fltKahant = 0.0, 0.0, 0.0, 0.0
         for intFy, intFx in ti.ndrange(tenVer.shape[1], tenHor.shape[1]):
@@ -14,8 +13,7 @@ def sepconv_out(tenIn: ti.types.ndarray(), tenVer: ti.types.ndarray(), tenHor: t
             fltKahant = fltOut + fltKahany
             fltKahanc = (fltKahant - fltOut) - fltKahany
             fltOut = fltKahant
-        tenOut[intIndex] = fltOut
-        intIndex += 1
+        tenOut[i, ch, y, x] = fltOut
 
 
 def worker_interface(op_name, tensors):
@@ -27,11 +25,8 @@ def worker_interface(op_name, tensors):
             tenVer.shape[2] and tenHor.shape[2],
             tenVer.shape[3] and tenHor.shape[3],
         ]
-        tenOut = tenIn.new_zeros([
-            int(reduce(lambda a, b: a * b, real_tenOut_shape))
-        ])
+        tenOut = tenIn.new_zeros(real_tenOut_shape)
         sepconv_out(tenIn, tenVer, tenHor, tenOut)
-        tenOut = tenOut.view(*real_tenOut_shape)
         return (tenOut, )
     
     raise NotImplementedError(op_name)

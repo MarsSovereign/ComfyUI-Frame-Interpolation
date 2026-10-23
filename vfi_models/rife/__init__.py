@@ -1,9 +1,8 @@
 import gc
 import torch
 import pathlib
-from vfi_utils import load_file_from_github_release, preprocess_frames, postprocess_frames, InterpolationStateList
+from vfi_utils import load_file_from_github_release, preprocess_frames, postprocess_frames, InterpolationStateList, generic_frame_loop
 import typing
-import warnings
 import comfy.model_management as model_management
 from comfy.model_management import get_torch_device, soft_empty_cache, unload_all_models
 from packaging import version
@@ -132,9 +131,10 @@ class RIFE_VFI:
         torch_dtype = DTYPE_MAP[dtype]
         device = get_torch_device()
 
-        if ckpt_name.startswith("sudo_rife4") and any(int(m) > 2 for m in (multiplier if isinstance(multiplier, list) else [multiplier])):
-            # Measured: its output barely changes with the timestep, so non-middle frames come out wrong
-            warnings.warn(f"{ckpt_name} only produces correct frames at multiplier=2 (it ignores the timestep). Use rife47/rife49 or newer for other multipliers.")
+        # sudo_rife4 effectively ignores the timestep (measured: t=0.25/0.75 come out as t=0.5),
+        # so multipliers above 2 are built by recursive halving instead
+        midpoint_only = ckpt_name.startswith("sudo_rife4") and any(
+            int(m) > 2 for m in (multiplier if isinstance(multiplier, list) else [multiplier]))
 
         #  4.26 disable ensemble
         if arch_ver == "4.26":
@@ -178,6 +178,21 @@ class RIFE_VFI:
             scale_list = [16 / scale_factor, 8 / scale_factor, 4 / scale_factor, 2 / scale_factor, 1 / scale_factor]
         else:
             scale_list = [8 / scale_factor, 4 / scale_factor, 2 / scale_factor, 1 / scale_factor]
+
+        if midpoint_only:
+            def return_middle_frame(frame_0, frame_1, _timestep, model):
+                t = torch.full((frame_0.shape[0], 1, 1, 1), 0.5, dtype=torch_dtype, device=device)
+                return model(frame_0.to(torch_dtype), frame_1.to(torch_dtype), t, scale_list, fast_mode, ensemble).clamp(0, 1).float()
+
+            interpolation_model.to(device)
+            try:
+                with torch.inference_mode():
+                    out = generic_frame_loop(type(self).__name__, frames, clear_cache_after_n_frames, multiplier, return_middle_frame,
+                                             interpolation_model, interpolation_states=optional_interpolation_states,
+                                             use_timestep=False, dtype=torch.float32)
+            finally:
+                interpolation_model.to("cpu")
+            return (postprocess_frames(out),)
 
         # Build a flat list of all (pair_idx, timestep) tasks, skipping excluded pairs.
         # Each task produces exactly one intermediate frame.

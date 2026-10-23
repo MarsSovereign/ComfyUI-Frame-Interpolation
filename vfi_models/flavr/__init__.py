@@ -91,7 +91,7 @@ class FLAVR_VFI:
             if not skipped:
                 new_frames = model([frame0.to(device), frame1.to(device), frame2.to(device), frame3.to(device)])
                 number_of_frames_processed_since_last_cleared_cuda_cache += 2
-                output_frames.extend(new_frame.detach().cpu() for new_frame in new_frames)
+                output_frames.extend(new_frame.detach().clamp(0, 1).cpu() for new_frame in new_frames)
             output_frames.append(frame2)
             if frame_itr == len(frames) - 4:
                 output_frames.append(frame3)

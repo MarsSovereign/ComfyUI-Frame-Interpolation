@@ -1,5 +1,5 @@
-import comfy.model_management as model_management
 import torch
+import sys
 import torch.multiprocessing as mp
 from .worker_process import f
 from .utils import to_shared_memory
@@ -10,25 +10,48 @@ from .correlation import ModuleCorrelation, FunctionCorrelation, _FunctionCorrel
 from .batch_edt import batch_edt
 
 parent_conn, child_conn, process = None, None, None
-device = model_management.get_torch_device()
+def _device():
+    # Imported lazily: the spawned worker imports this package too, and must not initialise
+    # ComfyUI's model management (it would probe the GPU without ComfyUI's launch arguments)
+    import comfy.model_management as model_management
+    return model_management.get_torch_device()
 
 def req_to_taichi_process(op_name, *tensors):
     global parent_conn, child_conn, process
     if parent_conn is None:
-        mp.set_start_method('spawn', force=True)
-        parent_conn, child_conn = mp.Pipe()
-        process = mp.Process(target=f, args=(child_conn, device))
-        process.start()
+        # A private spawn context, so ComfyUI's global multiprocessing start method is left alone
+        ctx = mp.get_context('spawn')
+        parent_conn, child_conn = ctx.Pipe()
+        process = ctx.Process(target=f, args=(child_conn, _device()), daemon=True)
+        # spawn normally re-runs the parent's __main__ (ComfyUI's main.py) in the child, which
+        # isn't import-safe there; the worker only needs its own module, so hide main's path
+        main_module = sys.modules["__main__"]
+        main_file, main_spec = getattr(main_module, "__file__", None), getattr(main_module, "__spec__", None)
+        try:
+            if main_file is not None:
+                del main_module.__file__
+            main_module.__spec__ = None
+            process.start()
+        finally:
+            if main_file is not None:
+                main_module.__file__ = main_file
+            main_module.__spec__ = main_spec
     
     tensors = to_shared_memory(tensors)
     parent_conn.send((op_name, tensors))
+    # Don't block forever if the worker died (e.g. taichi failed to start); restart it on the next call
+    while not parent_conn.poll(1):
+        if not process.is_alive():
+            exitcode = process.exitcode
+            parent_conn, child_conn, process = None, None, None
+            raise RuntimeError(f"Taichi ops worker exited unexpectedly (exit code {exitcode}), see the console log for its error")
     result = parent_conn.recv()
     del tensors
     
     if type(result) not in [tuple, list]:
         raise Exception(result)
         
-    return [tensor.to(device) for tensor in result]
+    return [tensor.to(_device()) for tensor in result]
 
 def softsplat(
     tenIn: torch.Tensor, tenFlow: torch.Tensor, tenMetric: torch.Tensor, strMode: str
@@ -149,7 +172,7 @@ class sepconv_func:
         return req_to_taichi_process("sepconv_out", tenIn, tenVer, tenHor)[0]
 
 def init():
-    one_sample = torch.ones(1, 3, 16, 16, dtype=torch.float32, device=device)
+    one_sample = torch.ones(1, 3, 16, 16, dtype=torch.float32, device=_device())
     softsplat_func(one_sample, one_sample)
     costvol_func.apply(one_sample, one_sample)
     sepconv_func.apply(one_sample, one_sample, one_sample)

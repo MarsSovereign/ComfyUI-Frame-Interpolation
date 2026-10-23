@@ -623,12 +623,12 @@ class Network(torch.nn.Module):
         with torch.set_grad_enabled(False):
             tenStack = torch.stack(tenSeq, 1)
             tenMean = (
-                tenStack.view(tenStack.shape[0], -1)
+                tenStack.reshape(tenStack.shape[0], -1)
                 .mean(1, True)
                 .view(tenStack.shape[0], 1, 1, 1)
             )
             tenStd = (
-                tenStack.view(tenStack.shape[0], -1)
+                tenStack.reshape(tenStack.shape[0], -1)
                 .std(1, True)
                 .view(tenStack.shape[0], 1, 1, 1)
             )

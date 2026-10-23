@@ -62,7 +62,14 @@ class AMT_VFI:
         ckpt_config = CKPT_CONFIGS[ckpt_name]
 
         interpolation_model = ckpt_config["network"](**ckpt_config["params"])
-        interpolation_model.load_state_dict(torch.load(model_path, map_location='cpu')["state_dict"])
+        # amt-s/amt-l pickle a typing.OrderedDict, which torch>=2.6 rejects by default; allow just that type
+        safe_globals = getattr(torch.serialization, "safe_globals", None)
+        if safe_globals is None:  # torch<2.5 doesn't default to weights_only
+            sd = torch.load(model_path, map_location='cpu')
+        else:
+            with safe_globals([typing.OrderedDict]):
+                sd = torch.load(model_path, map_location='cpu')
+        interpolation_model.load_state_dict(sd["state_dict"])
         interpolation_model.eval().to(get_torch_device())
 
         frames = preprocess_frames(frames)

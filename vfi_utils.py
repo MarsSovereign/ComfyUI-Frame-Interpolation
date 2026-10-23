@@ -240,14 +240,15 @@ def _generic_frame_loop(
         frame1 = frames[frame_itr+1:frame_itr+2].to(dtype=torch.float32).to(DEVICE)
 
         if use_timestep:
-            # Move each frame to CPU as soon as it's made so VRAM doesn't grow with the multiplier
+            # Move each frame to CPU as soon as it's made so VRAM doesn't grow with the multiplier.
+            # Clamp: some models (e.g. CAIN) overshoot [0, 1], which wraps around in 8-bit conversions
             for middle_i in range(1, multiplier):
                 middle_frame = return_middle_frame_function(frame0, frame1, middle_i / multiplier, *return_middle_frame_function_args)
-                output_frames[out_len] = middle_frame.detach().cpu().to(dtype=dtype)
+                output_frames[out_len] = middle_frame.detach().clamp(0, 1).cpu().to(dtype=dtype)
                 out_len += 1
         else:
             for middle_frame in non_timestep_inference(frame0, frame1, multiplier - 1):
-                output_frames[out_len] = middle_frame.detach().cpu().to(dtype=dtype)
+                output_frames[out_len] = middle_frame.detach().clamp(0, 1).cpu().to(dtype=dtype)
                 out_len += 1
 
         number_of_frames_processed_since_last_cleared_cuda_cache += 1

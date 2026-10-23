@@ -3,6 +3,7 @@ import torch
 import pathlib
 from vfi_utils import load_file_from_github_release, preprocess_frames, postprocess_frames, InterpolationStateList
 import typing
+import warnings
 import comfy.model_management as model_management
 from comfy.model_management import get_torch_device, soft_empty_cache, unload_all_models
 from packaging import version
@@ -131,6 +132,10 @@ class RIFE_VFI:
         torch_dtype = DTYPE_MAP[dtype]
         device = get_torch_device()
 
+        if ckpt_name.startswith("sudo_rife4") and any(int(m) > 2 for m in (multiplier if isinstance(multiplier, list) else [multiplier])):
+            # Measured: its output barely changes with the timestep, so non-middle frames come out wrong
+            warnings.warn(f"{ckpt_name} only produces correct frames at multiplier=2 (it ignores the timestep). Use rife47/rife49 or newer for other multipliers.")
+
         #  4.26 disable ensemble
         if arch_ver == "4.26":
             ensemble = False  # 4.26 版本不支持 ensemble
@@ -141,7 +146,10 @@ class RIFE_VFI:
         if cache_key not in _model_cache:
             _model_cache.clear()
             interpolation_model = IFNet(arch_ver=arch_ver)
-            interpolation_model.load_state_dict(torch.load(model_path, weights_only=False))
+            state_dict = torch.load(model_path, map_location='cpu', weights_only=False)
+            # 4.26 ships its training-only distillation branch; Practical-RIFE ignores it too (strict=False)
+            state_dict = {k: v for k, v in state_dict.items() if not k.startswith(("teacher.", "caltime."))}
+            interpolation_model.load_state_dict(state_dict)
             if torch_dtype != torch.float32:
                 interpolation_model = interpolation_model.to(torch_dtype)
             interpolation_model.eval()
@@ -246,7 +254,7 @@ class RIFE_VFI:
                         continue
 
                     for idx, (pair_idx, _) in enumerate(batch_tasks):
-                        results[pair_idx].append(middle_frames[idx : idx + 1].to(dtype=torch_dtype))
+                        results[pair_idx].append(middle_frames[idx : idx + 1].float())
                         tasks_remaining_per_pair[pair_idx] -= 1
                         # Clear cache after finishing each pair's worth of tasks
                         if tasks_remaining_per_pair[pair_idx] == 0:
@@ -263,13 +271,14 @@ class RIFE_VFI:
             # Offload so the cached model doesn't hold VRAM between runs
             interpolation_model.to("cpu")
 
-        # Assemble output: each original frame followed by its interpolated frames
+        # Assemble output: each original frame followed by its interpolated frames.
+        # Source frames stay in their original fp32 so they pass through unchanged.
         output_frames: typing.List[torch.Tensor] = []
         for pair_idx in range(n_pairs):
-            output_frames.append(frames[pair_idx : pair_idx + 1].to(dtype=torch_dtype))
+            output_frames.append(frames[pair_idx : pair_idx + 1])
             for mid in results[pair_idx]:
                 output_frames.append(mid)
-        output_frames.append(frames[-1:].to(dtype=torch_dtype))
+        output_frames.append(frames[-1:])
 
         print("Comfy-VFI: Final clearing cache...", end=' ')
         soft_empty_cache()

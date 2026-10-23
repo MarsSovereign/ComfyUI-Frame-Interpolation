@@ -1713,15 +1713,15 @@ class Model:
 
     def load_model(self, path_dict):
         #models/rife46.pth
-        self.ifnet.load_state_dict(torch.load(path_dict["ifnet"]))
+        self.ifnet.load_state_dict(torch.load(path_dict["ifnet"], map_location="cpu"))
         #models/GMFSS_fortuna_flownet.pkl
-        self.flownet.load_state_dict(torch.load(path_dict["flownet"]))
+        self.flownet.load_state_dict(torch.load(path_dict["flownet"], map_location="cpu"))
         #models/GMFSS_fortuna_union_metric.pkl
-        self.metricnet.load_state_dict(torch.load(path_dict["metricnet"]))
+        self.metricnet.load_state_dict(torch.load(path_dict["metricnet"], map_location="cpu"))
         #models/GMFSS_fortuna_union_feat.pkl
-        self.feat_ext.load_state_dict(torch.load(path_dict["feat_ext"]))
+        self.feat_ext.load_state_dict(torch.load(path_dict["feat_ext"], map_location="cpu"))
         #models/GMFSS_fortuna_union_fusionnet.pkl
-        self.fusionnet.load_state_dict(torch.load(path_dict["fusionnet"]))
+        self.fusionnet.load_state_dict(torch.load(path_dict["fusionnet"], map_location="cpu"))
 
     def reuse(self, img0, img1, scale):
         feat11, feat12, feat13 = self.feat_ext(img0)

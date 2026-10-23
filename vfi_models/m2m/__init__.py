@@ -42,7 +42,7 @@ class M2M_VFI:
         from .M2M_arch import M2M_PWC
         model_path = load_file_from_github_release(MODEL_TYPE, ckpt_name)
         interpolation_model = M2M_PWC()
-        interpolation_model.load_state_dict(torch.load(model_path))
+        interpolation_model.load_state_dict(torch.load(model_path, map_location='cpu'))
         interpolation_model.eval().to(get_torch_device())
         frames = preprocess_frames(frames)
         

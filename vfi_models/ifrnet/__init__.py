@@ -42,12 +42,13 @@ class IFRNet_VFI:
         from .IFRNet_L_arch import IRFNet_L
         model_path = load_file_from_github_release(MODEL_TYPE, ckpt_name)
         interpolation_model = IRFNet_S() if 'S' in ckpt_name else IRFNet_L()
-        interpolation_model.load_state_dict(torch.load(model_path))
+        interpolation_model.load_state_dict(torch.load(model_path, map_location='cpu'))
         interpolation_model.eval().to(get_torch_device())
         frames = preprocess_frames(frames)
         
         def return_middle_frame(frame_0, frame_1, timestep, model, scale_factor):
-            return model(frame_0, frame_1, timestep, scale_factor)
+            # forward() takes (img0, img1, scale_factor, timestep), so pass by name
+            return model(frame_0, frame_1, scale_factor=scale_factor, timestep=timestep)
         
         args = [interpolation_model, scale_factor]
         out = postprocess_frames(

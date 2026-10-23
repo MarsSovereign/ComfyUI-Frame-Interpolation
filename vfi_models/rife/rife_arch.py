@@ -51,10 +51,9 @@ def warp(tenInput, tenFlow):
         1,
     )
 
-    g = (backwarp_tenGrid[k] + tenFlow).permute(0, 2, 3, 1)
-
-    if g.dtype != tenInput.dtype:
-        g = g.to(tenInput.dtype)
+    # Sample in fp32 even for fp16/bf16 models: a half-precision grid can't address pixels
+    # precisely at video widths (bf16 is ~7px off at 1080p), and CPU grid_sample yields NaN with it
+    g = (backwarp_tenGrid[k] + tenFlow).permute(0, 2, 3, 1).float()
 
     padding_mode = "border"
     if device.type == "mps":
@@ -62,12 +61,12 @@ def warp(tenInput, tenFlow):
         padding_mode = "zeros"
         g = g.clamp(-1, 1)
     return torch.nn.functional.grid_sample(
-        input=tenInput,
+        input=tenInput.float(),
         grid=g,
         mode="bilinear",
         padding_mode=padding_mode,
         align_corners=True,
-    )
+    ).to(tenInput.dtype)
 
 
 def conv(

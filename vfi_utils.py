@@ -1,5 +1,7 @@
 import yaml
 import os
+import io
+import zipfile
 from torch.hub import download_url_to_file, get_dir
 from urllib.parse import urlparse
 import torch
@@ -37,6 +39,32 @@ CKPT_FALLBACK_URLS = {
         "https://huggingface.co/uwg/upscaler/resolve/main/ESRGAN/sudo_rife4_269.662_testV1_scale1.pth",
         "https://huggingface.co/licyk/sd-upscaler-models/resolve/main/ESRGAN/sudo_rife4_269.662_testV1_scale1.pth",
     ],
+    # Byte-identical mirror of the official IFRNet release (its Vimeo90K files match ours by sha256)
+    # VSGAN no longer hosts these .pth files (moved to ONNX)
+    "sepconv.pth": [
+        # Official "Revisiting Adaptive Convolutions" weights from the paper's author
+        "https://content.sniklaus.com/resepconv/network-paper.pytorch",
+    ],
+    "stmfnet.pth": [
+        "https://huggingface.co/camenduru/stmfnet/resolve/main/stmfnet.pth",
+    ],
+    "IFRNet_S_GoPro.pth": [
+        "https://huggingface.co/eapiwork/saved_models/resolve/main/checkpoints/IFRNet_small/IFRNet_S_GoPro.pth",
+    ],
+    "IFRNet_L_GoPro.pth": [
+        "https://huggingface.co/eapiwork/saved_models/resolve/main/checkpoints/IFRNet_large/IFRNet_L_GoPro.pth",
+    ],
+}
+
+# Checkpoints that only survive inside their authors' release archives. As a last resort the
+# archive is downloaded, the weights extracted and saved under the name the nodes expect.
+CKPT_ARCHIVE_SOURCES = {
+    # Official Practical-RIFE v4.6 release (needed by GMFSS Fortuna union)
+    "rife46.pth": {
+        "url": "https://drive.usercontent.google.com/download?id=1EAbsfY7mjnXNa6RAsATj2ImAEqmHTjbE&export=download&confirm=t",
+        "member": "train_log/flownet.pkl",
+        "strip_prefix": "module.",
+    },
 }
 
 config_path = os.path.join(os.path.dirname(__file__), "./config.yaml")
@@ -72,7 +100,8 @@ class MakeInterpolationStateList:
     CATEGORY = "ComfyUI-Frame-Interpolation/VFI"    
 
     def create_options(self, frame_indices: str, is_skip_list: bool):
-        frame_indices_list = [int(item) for item in frame_indices.split(',')]
+        # Tolerate trailing commas, blank lines and an empty list
+        frame_indices_list = [int(item) for item in frame_indices.split(',') if item.strip()]
         
         interpolation_state_list = InterpolationStateList(
             frame_indices=frame_indices_list,
@@ -105,10 +134,8 @@ def load_file_from_url(url, model_dir=None, progress=True, file_name=None):
 
     os.makedirs(model_dir, exist_ok=True)
 
-    parts = urlparse(url)
-    file_name = os.path.basename(parts.path)
-    if file_name is not None:
-        file_name = file_name
+    if file_name is None:
+        file_name = os.path.basename(urlparse(url).path)
     cached_file = os.path.abspath(os.path.join(model_dir, file_name))
     if not os.path.exists(cached_file):
         print(f'Downloading: "{url}" to {cached_file}\n')
@@ -120,18 +147,41 @@ def load_file_from_github_release(model_type, ckpt_name):
     all_urls = [base + ckpt_name for base in BASE_MODEL_DOWNLOAD_URLS]
     all_urls += CKPT_FALLBACK_URLS.get(ckpt_name, [])
 
+    # Save under ckpt_name whatever the mirror calls the file, so later runs find it locally
     for i, url in enumerate(all_urls):
         try:
-            return load_file_from_url(url, get_ckpt_container_path(model_type))
+            return load_file_from_url(url, get_ckpt_container_path(model_type), file_name=ckpt_name)
         except Exception:
             traceback_str = traceback.format_exc()
             if i < len(all_urls) - 1:
                 print("Failed! Trying another endpoint.")
             error_strs.append(f"Error when downloading from: {url}\n\n{traceback_str}")
 
+    if ckpt_name in CKPT_ARCHIVE_SOURCES:
+        try:
+            return load_file_from_archive(model_type, ckpt_name, **CKPT_ARCHIVE_SOURCES[ckpt_name])
+        except Exception:
+            error_strs.append(f"Error when extracting from archive: {CKPT_ARCHIVE_SOURCES[ckpt_name]['url']}\n\n{traceback.format_exc()}")
+
     error_str = '\n\n'.join(error_strs)
     raise Exception(f"Tried all urls to download {ckpt_name} but no success. Below is the error log:\n\n{error_str}")
                 
+
+def load_file_from_archive(model_type, ckpt_name, url, member, strip_prefix=""):
+    model_dir = get_ckpt_container_path(model_type)
+    archive_path = load_file_from_url(url, model_dir, file_name=ckpt_name + ".zip")
+    try:
+        with zipfile.ZipFile(archive_path) as archive, archive.open(member) as f:
+            state_dict = torch.load(io.BytesIO(f.read()), map_location="cpu", weights_only=True)
+    except Exception:
+        os.remove(archive_path)  # don't keep a bad download (e.g. an HTML error page) cached
+        raise
+    state_dict = {k[len(strip_prefix):] if k.startswith(strip_prefix) else k: v for k, v in state_dict.items()}
+    ckpt_path = os.path.join(model_dir, ckpt_name)
+    torch.save(state_dict, ckpt_path + ".tmp")
+    os.replace(ckpt_path + ".tmp", ckpt_path)
+    os.remove(archive_path)
+    return ckpt_path
 
 def load_file_from_direct_url(model_type, url):
     return load_file_from_url(url, get_ckpt_container_path(model_type))

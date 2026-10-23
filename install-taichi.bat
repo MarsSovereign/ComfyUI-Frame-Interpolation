@@ -1,4 +1,6 @@
 @echo off
+
+set "python_exec=..\..\..\python_embeded\python.exe"
 echo Installing Taichi lang backend...
 
 if exist "%python_exec%" (

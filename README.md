@@ -20,7 +20,7 @@ A custom node set for Video Frame Interpolation in ComfyUI.
 * AMT VFI
 * Make Interpolation State List
 * STMFNet VFI (requires at least 4 frames, can only do 2x interpolation for now)
-* FLAVR VFI (same conditions as STMFNet)
+* FLAVR VFI (requires at least 4 frames; the checkpoint sets the factor: `FLAVR_2x`/`4x`/`8x`)
 * CAIN VFI
 * ATM-VFI (only supports 2x interpolation)
 * MoMo VFI (only supports 2x interpolation)
@@ -45,7 +45,7 @@ python install.py
 ## Support for non-CUDA device (experimental)
 If you don't have a NVidia card, you can try `taichi` ops backend powered by [Taichi Lang](https://www.taichi-lang.org/)
 
-On Windows, you can install it by running `install.bat` or `pip install taichi` on Linux
+On Windows, you can install it by running `install-taichi.bat` or `pip install taichi` on Linux
 
 Then change value of `ops_backend` from `cupy` to `taichi` in `config.yaml`
 

@@ -43,7 +43,7 @@ class IFUnet_VFI:
         from .IFUNet_arch import IFUNetModel
         model_path = load_file_from_github_release(MODEL_TYPE, ckpt_name)
         interpolation_model = IFUNetModel()
-        interpolation_model.load_state_dict(torch.load(model_path))
+        interpolation_model.load_state_dict(torch.load(model_path, map_location='cpu'))
         interpolation_model.eval().to(get_torch_device())
         frames = preprocess_frames(frames)
         

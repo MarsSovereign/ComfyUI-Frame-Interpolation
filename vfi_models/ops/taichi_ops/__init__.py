@@ -3,6 +3,11 @@ import torch
 import torch.multiprocessing as mp
 from .worker_process import f
 from .utils import to_shared_memory
+# Ops not ported to taichi yet; exported so the shared import in ops/__init__.py works,
+# and they raise NotImplementedError only if a model actually calls them
+from .adacof import FunctionAdaCoF
+from .correlation import ModuleCorrelation, FunctionCorrelation, _FunctionCorrelation
+from .batch_edt import batch_edt
 
 parent_conn, child_conn, process = None, None, None
 device = model_management.get_torch_device()

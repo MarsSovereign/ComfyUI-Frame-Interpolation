@@ -12,7 +12,7 @@ device = get_torch_device()
 NBR_FRAME = 4
 
 def build_flavr(model_path):
-    sd = torch.load(model_path)['state_dict']
+    sd = torch.load(model_path, map_location='cpu')['state_dict']
     sd = {k.partition("module.")[-1]:v for k,v in sd.items()}
 
     #Ref: Class UNet_3D_3D
@@ -33,7 +33,8 @@ class FLAVR_VFI:
                 "ckpt_name": (CKPT_NAMES, ),
                 "frames": ("IMAGE", ),
                 "clear_cache_after_n_frames": ("INT", {"default": 10, "min": 1, "max": 1000}),
-                "multiplier": ("INT", {"default": 2, "min": 2, "max": 2}), #TODO: Implement recursively invoking interpolator for multi-frame interpolation
+                "multiplier": ("INT", {"default": 2, "min": 2, "max": 8,
+                                       "tooltip": "Set by the checkpoint: FLAVR_2x=2, FLAVR_4x=4, FLAVR_8x=8"}),
                 "duplicate_first_last_frames": ("BOOLEAN", {"default": False})
             },
             "optional": {
@@ -56,13 +57,14 @@ class FLAVR_VFI:
         optional_interpolation_states: InterpolationStateList = None,
         **kwargs
     ):
-        if multiplier != 2:
-            warnings.warn("Currently, FLAVR only supports 2x interpolation. The process will continue but please set multiplier=2 afterward")
-
         assert_batch_size(frames, batch_size=4, vfi_name="FLAVR")
         interpolation_states = optional_interpolation_states
         model_path = load_file_from_github_release(MODEL_TYPE, ckpt_name)
         model = build_flavr(model_path)
+        # Each checkpoint predicts a fixed number of middle frames (1, 3 or 7)
+        ckpt_multiplier = model.n_outputs + 1
+        if multiplier != ckpt_multiplier:
+            warnings.warn(f"{ckpt_name} always interpolates {ckpt_multiplier}x, ignoring multiplier={multiplier}. Choose FLAVR_2x/4x/8x.pth to change the factor.")
         frames = preprocess_frames(frames)
         padder = InputPadder(frames.shape, 16)
         frames = padder.pad(frames)
@@ -87,9 +89,9 @@ class FLAVR_VFI:
                     output_frames.append(frame0) # repeat the first frame
                 output_frames.append(frame1)
             if not skipped:
-                new_frame = model([frame0.to(device), frame1.to(device), frame2.to(device), frame3.to(device)])[0].detach().cpu()
+                new_frames = model([frame0.to(device), frame1.to(device), frame2.to(device), frame3.to(device)])
                 number_of_frames_processed_since_last_cleared_cuda_cache += 2
-                output_frames.append(new_frame)
+                output_frames.extend(new_frame.detach().cpu() for new_frame in new_frames)
             output_frames.append(frame2)
             if frame_itr == len(frames) - 4:
                 output_frames.append(frame3)

@@ -39,7 +39,7 @@ class CAIN_VFI:
     ):
         from .cain_arch import CAIN
         model_path = load_file_from_github_release(MODEL_TYPE, ckpt_name)
-        sd = torch.load(model_path)["state_dict"]
+        sd = torch.load(model_path, map_location='cpu')["state_dict"]
         sd = {key.replace('module.', ''): value for key, value in sd.items()}
 
 

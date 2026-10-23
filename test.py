@@ -25,7 +25,7 @@ for i, ckpt_name in enumerate(vfi_node_class.INPUT_TYPES()["required"]["ckpt_nam
         frame_1,
         frame_0,
         frame_1
-    ], dim=0).cuda(), multipler=4, batch_size=2)[0]
+    ], dim=0).cuda(), multiplier=4)[0]
     print(result.shape)
     print(f"Generated {result.size(0)} frames")
     frames = [PIL.Image.fromarray(np.clip((frame * 255).numpy(), 0, 255).astype(np.uint8)) for frame in result]
@@ -34,5 +34,5 @@ for i, ckpt_name in enumerate(vfi_node_class.INPUT_TYPES()["required"]["ckpt_nam
     for j, frame in enumerate(frames):
         frame.save(f"test_result/video{i}/{j}.jpg")
     frames[0].save(f"test_result/video{i}.gif", save_all=True, append_images=frames[1:], optimize=True, duration=1/3, loop=0)
-    os.startfile(f"test_result{os.path.sep}video{i}.gif")
+    print(f"Saved test_result{os.path.sep}video{i}.gif")
 #torchvision.io.video.write_video("test.mp4", einops.rearrange(result, "n c h w -> n h w c").cpu(), fps=1)

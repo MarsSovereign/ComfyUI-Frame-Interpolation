@@ -43,7 +43,6 @@ class CAIN_VFI:
         sd = {key.replace('module.', ''): value for key, value in sd.items()}
 
 
-        global interpolation_model
         interpolation_model = CAIN(depth=3)
         interpolation_model.load_state_dict(sd)
         interpolation_model.eval().to(get_torch_device())

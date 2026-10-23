@@ -56,10 +56,6 @@ class STMFNet_VFI:
         number_of_frames_processed_since_last_cleared_cuda_cache = 0
         output_frames = []
         for frame_itr in range(len(frames) - 3):
-            #Does skipping frame i+1 make sanse in this case?
-            if interpolation_states is not None and interpolation_states.is_frame_skipped(frame_itr) and interpolation_states.is_frame_skipped(frame_itr + 1):
-                continue
-            
             #Ensure that input frames are in fp32 - the same dtype as model
             frame0, frame1, frame2, frame3 = (
                 frames[frame_itr:frame_itr+1].float(),
@@ -67,15 +63,19 @@ class STMFNet_VFI:
                 frames[frame_itr+2:frame_itr+3].float(), 
                 frames[frame_itr+3:frame_itr+4].float()
             )
-            new_frame = model(frame0.to(device), frame1.to(device), frame2.to(device), frame3.to(device)).detach().cpu()
-            number_of_frames_processed_since_last_cleared_cuda_cache += 2
-            
+            #Does skipping frame i+1 make sanse in this case?
+            # A skipped window still emits its source frames, just without the new middle frame
+            skipped = interpolation_states is not None and interpolation_states.is_frame_skipped(frame_itr) and interpolation_states.is_frame_skipped(frame_itr + 1)
+
             if frame_itr == 0:
                 output_frames.append(frame0)
                 if duplicate_first_last_frames:
                     output_frames.append(frame0) # repeat the first frame
                 output_frames.append(frame1)
-            output_frames.append(new_frame)
+            if not skipped:
+                new_frame = model(frame0.to(device), frame1.to(device), frame2.to(device), frame3.to(device)).detach().cpu()
+                number_of_frames_processed_since_last_cleared_cuda_cache += 2
+                output_frames.append(new_frame)
             output_frames.append(frame2)
             if frame_itr == len(frames) - 4:
                 output_frames.append(frame3)

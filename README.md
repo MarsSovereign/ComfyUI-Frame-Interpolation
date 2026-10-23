@@ -14,13 +14,14 @@ A custom node set for Video Frame Interpolation in ComfyUI.
 * IFRNet VFI
 * IFUnet VFI
 * M2M VFI
-* RIFE VFI (4.0 - 4.9) (Note that option `fast_mode` won't do anything from v4.5+ as `contextnet` is removed)
+* RIFE VFI (4.0 - 4.26, 4.25+ recommended) (Note that option `fast_mode` won't do anything from v4.5+ as `contextnet` is removed)
 * FILM VFI
 * Sepconv VFI
 * AMT VFI
 * Make Interpolation State List
 * STMFNet VFI (requires at least 4 frames, can only do 2x interpolation for now)
 * FLAVR VFI (same conditions as STMFNet)
+* CAIN VFI
 * ATM-VFI (only supports 2x interpolation)
 * MoMo VFI (only supports 2x interpolation)
 
@@ -35,7 +36,7 @@ https://github.com/ltdrdata/ComfyUI-Manager#how-to-use
 #### Windows
 Run install.bat
 
-For Window users, if you are having trouble with cupy, please run `install.bat` instead of `install-cupy.py` or `python install.py`.
+For Window users, if you are having trouble with cupy, please run `install.bat` instead of `python install.py`.
 #### Linux
 Open your shell app and start venv if it is used for ComfyUI. Run:
 ```
@@ -62,7 +63,7 @@ It is recommended to use LoadImages (LoadImagesFromDirectory) from [ComfyUI-Adva
 ## Example
 ### Simple workflow
 Workflow metadata isn't embeded
-Download these two images [anime0.png](./demo_frames/anime0.png) and [anime1.png](./demo_frames/anime0.png) and put them into a folder like `E:\test` in this image.
+Download these two images [anime0.png](./demo_frames/anime0.png) and [anime1.png](./demo_frames/anime1.png) and put them into a folder like `E:\test` in this image.
 ![](./example.png)
 
 ### Complex workflow

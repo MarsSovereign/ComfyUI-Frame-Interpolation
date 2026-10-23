@@ -4,7 +4,8 @@ import taichi as ti
 import taichi.math as tm
 
 @ti.func
-def put_to_tenOut(tenOut: ti.types.ndarray(), fltIn: ti.i32, flt: ti.i32, pos:tm.uvec2, i:ti.i32, ch:ti.i32):
+def put_to_tenOut(tenOut: ti.types.ndarray(), fltIn: ti.f32, flt: ti.f32, pos: tm.ivec2, i: ti.i32, ch: ti.i32):
+    # fltIn/flt are fractional pixel values and bilinear weights, pos can be negative near borders
     N, C, H, W = tenOut.shape
     if (pos.x >= 0) and (pos.x < W) and (pos.y >= 0) and (pos.y < H):
         tenOut[i, ch, pos.y, pos.x] += fltIn * flt

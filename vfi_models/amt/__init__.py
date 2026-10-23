@@ -76,7 +76,10 @@ class AMT_VFI:
         padder = InputPadder(frames.shape, 16)
         frames = padder.pad(frames)
         
+        # amt-s/l/g are the Vimeo90K (triplet) models and only predict the middle frame (measured:
+        # t=0.25/0.75 come out as t=0.5), so higher multipliers are built by recursive halving
         def return_middle_frame(frame_0, frame_1, timestep, model):
+            timestep = 0.5 if timestep is None else timestep
             return model(
                 frame_0, 
                 frame_1,
@@ -87,7 +90,7 @@ class AMT_VFI:
         
         args = [interpolation_model]
         out = generic_frame_loop(type(self).__name__, frames, clear_cache_after_n_frames, multiplier, return_middle_frame, *args, 
-                               interpolation_states=optional_interpolation_states, dtype=torch.float32)
+                               interpolation_states=optional_interpolation_states, use_timestep=False, dtype=torch.float32)
         out = padder.unpad(out)
         out = postprocess_frames(out)
         return (out,)

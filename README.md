@@ -51,6 +51,11 @@ Then change value of `ops_backend` from `cupy` to `taichi` in `config.yaml`
 
 If `NotImplementedError` appears, a VFI node in the workflow isn't supported by taichi
 
+Which backend each node needs:
+* No custom ops (any device, `ops_backend` doesn't matter): RIFE, FILM, IFRNet, IFUnet, AMT, CAIN, FLAVR, ATM, MoMo
+* Works with `cupy` or `taichi`: GMFSS Fortuna, Sepconv
+* `cupy` only (NVIDIA): M2M, STMFNet
+
 ## Usage
 All VFI nodes can be accessed in **category** `ComfyUI-Frame-Interpolation/VFI` if the installation is successful and require a `IMAGE` containing frames (at least 2, or at least 4 for STMF-Net/FLAVR).
 

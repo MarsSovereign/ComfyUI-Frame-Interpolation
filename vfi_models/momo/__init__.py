@@ -139,6 +139,8 @@ class MOMO_VFI:
             multipliers += [2] * (len(frames) - len(multipliers) - 1)
         for frame_itr in range(len(frames) - 1): # Skip the final frame since there are no frames after it
             if interpolation_states is not None and interpolation_states.is_frame_skipped(frame_itr):
+                # Keep the source frame so skipped pairs aren't dropped from the output
+                output_frames.append(frames[frame_itr:frame_itr+1].to(dtype=dtype))
                 continue
             #Ensure that input frames are in fp32 - the same dtype as model
             frame_0 = frames[frame_itr:frame_itr+1].to(DEVICE).float()

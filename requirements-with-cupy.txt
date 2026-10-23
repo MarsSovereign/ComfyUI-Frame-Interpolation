@@ -7,4 +7,6 @@ scipy
 Pillow
 torchvision
 tqdm
+timm
+diffusers
 cupy-wheel

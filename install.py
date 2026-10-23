@@ -4,6 +4,8 @@ import sys
 import platform
 
 def get_cuda_ver_from_dir(cuda_home):
+    if cuda_home is None or not os.path.isdir(cuda_home):
+        return
     nvrtc = filter(lambda lib_file: "nvrtc-builtins" in lib_file, os.listdir(cuda_home))
     nvrtc = list(nvrtc)
     if len(nvrtc) == 0:
@@ -19,6 +21,25 @@ def get_cuda_ver_from_dir(cuda_home):
         return '11x'
     if '12' in nvrtc:
         return '12x'
+    if '13' in nvrtc:
+        return '13x'
+
+def get_cuda_ver_from_torch():
+    # Fallback for installs where nvrtc isn't under torch/lib (e.g. Linux pip wheels)
+    try:
+        import torch
+        cuda_ver = torch.version.cuda
+    except Exception:
+        return
+    if cuda_ver is None:
+        return
+    major, minor = cuda_ver.split('.')[:2]
+    if major == '10' and minor == '2':
+        return '102'
+    if major == '11' and minor in ('0', '1'):
+        return '11' + minor
+    if major in ('11', '12', '13'):
+        return major + 'x'
 
 s_param = '-s' if "python_embeded" in sys.executable else '' 
 
@@ -43,9 +64,9 @@ def install_cupy():
         print("CuPy is already installed.")
     except:
         print("Uninstall cupy if existed...")
-        os.system(f'"{sys.executable}" {s_param} -m pip uninstall -y cupy-wheel cupy-cuda102 cupy-cuda110 cupy-cuda111 cupy-cuda11x cupy-cuda12x')
+        os.system(f'"{sys.executable}" {s_param} -m pip uninstall -y cupy-wheel cupy-cuda102 cupy-cuda110 cupy-cuda111 cupy-cuda11x cupy-cuda12x cupy-cuda13x')
         print("Installing cupy...")
-        cuda_ver = get_cuda_ver_from_dir(cuda_home)
+        cuda_ver = get_cuda_ver_from_dir(cuda_home) or get_cuda_ver_from_torch()
         cupy_package = f"cupy-cuda{cuda_ver}" if cuda_ver is not None else "cupy-wheel"
         os.system(f'"{sys.executable}" {s_param} -m pip install {cupy_package}')
 

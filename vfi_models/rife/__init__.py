@@ -3,7 +3,8 @@ import torch
 import pathlib
 from vfi_utils import load_file_from_github_release, preprocess_frames, postprocess_frames, InterpolationStateList
 import typing
-from comfy.model_management import get_torch_device, soft_empty_cache
+import comfy.model_management as model_management
+from comfy.model_management import get_torch_device, soft_empty_cache, unload_all_models
 from packaging import version
 
 MODEL_TYPE = pathlib.Path(__file__).parent.name
@@ -28,7 +29,17 @@ DTYPE_MAP = {
 
 # Module-level model cache: avoids reloading weights on every node execution.
 # Key: (ckpt_name, dtype, torch_compile) — invalidated if any of these change.
+# Holds at most one model, kept on CPU between runs so it doesn't pin VRAM
+# outside of ComfyUI's memory management.
 _model_cache: typing.Dict[typing.Tuple, torch.nn.Module] = {}
+
+
+def _is_oom(e: Exception) -> bool:
+    # model_management.is_oom only exists in newer ComfyUI builds
+    is_oom = getattr(model_management, "is_oom", None)
+    if is_oom is not None:
+        return is_oom(e)
+    return isinstance(e, torch.cuda.OutOfMemoryError)
 
 
 class RIFE_VFI:
@@ -125,14 +136,15 @@ class RIFE_VFI:
             ensemble = False  # 4.26 版本不支持 ensemble
 
         # Cache the model by (ckpt_name, dtype, torch_compile) so repeated node
-        # executions skip the load_state_dict + device transfer entirely.
+        # executions skip reading and loading the checkpoint.
         cache_key = (ckpt_name, dtype, torch_compile)
         if cache_key not in _model_cache:
+            _model_cache.clear()
             interpolation_model = IFNet(arch_ver=arch_ver)
             interpolation_model.load_state_dict(torch.load(model_path, weights_only=False))
             if torch_dtype != torch.float32:
                 interpolation_model = interpolation_model.to(torch_dtype)
-            interpolation_model.eval().to(device)
+            interpolation_model.eval()
             # Opt 2: torch.compile() — JIT-compiles the model for 10-30% faster inference.
             # The first call triggers compilation (slow); all subsequent calls use the cached graph.
             if torch_compile:
@@ -178,48 +190,78 @@ class RIFE_VFI:
 
         frames_processed_since_cache_clear = 0
         pos = 0
+        cur_batch_size = batch_size
+        unloaded_comfy_models = False
 
-        # Opt 5: inference_mode disables autograd tracking entirely — lower overhead than no_grad().
-        # Opt 7: process batch_size tasks per GPU call. IFNet supports batched tensor timesteps,
-        #         so multiple (pair, timestep) combinations can be inferred in a single forward pass.
-        with torch.inference_mode():
-            while pos < len(tasks):
-                batch_tasks = tasks[pos : pos + batch_size]
+        def run_batch(batch_tasks):
+            frame0_list, frame1_list, timestep_list = [], [], []
+            for pair_idx, dt in batch_tasks:
+                frame0_list.append(frames[pair_idx : pair_idx + 1])
+                frame1_list.append(frames[pair_idx + 1 : pair_idx + 2])
+                timestep_list.append(dt)
 
-                frame0_list, frame1_list, timestep_list = [], [], []
-                for pair_idx, dt in batch_tasks:
-                    frame0_list.append(frames[pair_idx : pair_idx + 1])
-                    frame1_list.append(frames[pair_idx + 1 : pair_idx + 2])
-                    timestep_list.append(dt)
+            frame0_batch = torch.cat(frame0_list, dim=0).to(device, dtype=torch_dtype)
+            frame1_batch = torch.cat(frame1_list, dim=0).to(device, dtype=torch_dtype)
+            # Batched timestep tensor: shape [B, 1, 1, 1] — IFNet expands it internally
+            timestep_tensor = torch.tensor(timestep_list, dtype=torch_dtype, device=device).view(-1, 1, 1, 1)
 
-                frame0_batch = torch.cat(frame0_list, dim=0).to(device, dtype=torch_dtype)
-                frame1_batch = torch.cat(frame1_list, dim=0).to(device, dtype=torch_dtype)
-                # Batched timestep tensor: shape [B, 1, 1, 1] — IFNet expands it internally
-                timestep_tensor = torch.tensor(timestep_list, dtype=torch_dtype, device=device).view(-1, 1, 1, 1)
+            return interpolation_model(
+                frame0_batch,
+                frame1_batch,
+                timestep_tensor,
+                scale_list,
+                fast_mode,
+                ensemble,
+            ).clamp(0, 1).detach().cpu()
 
-                middle_frames = interpolation_model(
-                    frame0_batch,
-                    frame1_batch,
-                    timestep_tensor,
-                    scale_list,
-                    fast_mode,
-                    ensemble,
-                ).clamp(0, 1).detach().cpu()
+        interpolation_model.to(device)
+        try:
+            # Opt 5: inference_mode disables autograd tracking entirely — lower overhead than no_grad().
+            # Opt 7: process batch_size tasks per GPU call. IFNet supports batched tensor timesteps,
+            #         so multiple (pair, timestep) combinations can be inferred in a single forward pass.
+            with torch.inference_mode():
+                while pos < len(tasks):
+                    batch_tasks = tasks[pos : pos + cur_batch_size]
 
-                for idx, (pair_idx, _) in enumerate(batch_tasks):
-                    results[pair_idx].append(middle_frames[idx : idx + 1].to(dtype=torch_dtype))
-                    tasks_remaining_per_pair[pair_idx] -= 1
-                    # Clear cache after finishing each pair's worth of tasks
-                    if tasks_remaining_per_pair[pair_idx] == 0:
-                        frames_processed_since_cache_clear += 1
-                        if frames_processed_since_cache_clear >= clear_cache_after_n_frames:
-                            print("Comfy-VFI: Clearing cache...", end=' ')
-                            soft_empty_cache()
-                            gc.collect()
-                            frames_processed_since_cache_clear = 0
-                            print("Done cache clearing")
+                    oom = False
+                    try:
+                        middle_frames = run_batch(batch_tasks)
+                    except Exception as e:
+                        if not _is_oom(e) or (unloaded_comfy_models and cur_batch_size == 1):
+                            raise
+                        oom = True
 
-                pos += len(batch_tasks)
+                    # Recover outside the except block so the traceback's tensors are released first.
+                    # First unload models ComfyUI keeps resident (e.g. the video model), then halve the batch.
+                    if oom:
+                        if not unloaded_comfy_models:
+                            print("Comfy-VFI: Out of VRAM, unloading other models and retrying...")
+                            unload_all_models()
+                            unloaded_comfy_models = True
+                        else:
+                            cur_batch_size = max(1, cur_batch_size // 2)
+                            print(f"Comfy-VFI: Out of VRAM, retrying with batch_size={cur_batch_size}...")
+                        gc.collect()
+                        soft_empty_cache()
+                        continue
+
+                    for idx, (pair_idx, _) in enumerate(batch_tasks):
+                        results[pair_idx].append(middle_frames[idx : idx + 1].to(dtype=torch_dtype))
+                        tasks_remaining_per_pair[pair_idx] -= 1
+                        # Clear cache after finishing each pair's worth of tasks
+                        if tasks_remaining_per_pair[pair_idx] == 0:
+                            frames_processed_since_cache_clear += 1
+                            if frames_processed_since_cache_clear >= clear_cache_after_n_frames:
+                                print("Comfy-VFI: Clearing cache...", end=' ')
+                                soft_empty_cache()
+                                gc.collect()
+                                frames_processed_since_cache_clear = 0
+                                print("Done cache clearing")
+
+                    pos += len(batch_tasks)
+        finally:
+            # Offload so the cached model doesn't hold VRAM between runs
+            interpolation_model.to("cpu")
 
         # Assemble output: each original frame followed by its interpolated frames
         output_frames: typing.List[torch.Tensor] = []
